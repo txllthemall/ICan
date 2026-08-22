@@ -130,3 +130,9 @@ Device Capability Probe.
 
 Goal:
 discover the actual Camera2 / CameraX capabilities exposed by the connected OnePlus 15 CPH2745 before implementing real ICan Auto or camera profiles.
+
+### Phase 2D.1 — Device Capability Probe
+**Status: IN PROGRESS**
+- Implementation of `CameraCapabilityProbe` to inspect Camera2 characteristics.
+- Structured Logcat reporting of identity, sensor, lens, control, and stream capabilities.
+- Integrated into `MainActivity` startup.

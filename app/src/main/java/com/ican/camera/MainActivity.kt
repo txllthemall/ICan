@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ican.camera.capabilities.CameraCapabilityProbe
 import com.ican.camera.engine.CameraEngine
 import com.ican.camera.ui.CameraScreen
 import com.ican.camera.ui.theme.ICanTheme
@@ -41,6 +42,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         LogUtil.i("APP_CAMERA_START")
+        
+        // Trigger Device Capability Probe
+        CameraCapabilityProbe(this).runProbe()
+        
         cameraEngine = CameraEngine(this)
         
         enableEdgeToEdge()
