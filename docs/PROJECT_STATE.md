@@ -132,7 +132,14 @@ Goal:
 discover the actual Camera2 / CameraX capabilities exposed by the connected OnePlus 15 CPH2745 before implementing real ICan Auto or camera profiles.
 
 ### Phase 2D.1 — Device Capability Probe
-**Status: IN PROGRESS**
+**Status: COMPLETED**
 - Implementation of `CameraCapabilityProbe` to inspect Camera2 characteristics.
 - Structured Logcat reporting of identity, sensor, lens, control, and stream capabilities.
 - Integrated into `MainActivity` startup.
+
+### Phase 2D.2 — Physical Camera Mapping
+**Status: IN PROGRESS**
+- Implementation of `PhysicalCameraMapper` to classify logical and physical cameras.
+- Semantic classification: FRONT, MAIN, ULTRAWIDE, TELEPHOTO.
+- Deterministic focal-length based sorting for rear multi-camera systems.
+- Report logged and saved to app cache.
