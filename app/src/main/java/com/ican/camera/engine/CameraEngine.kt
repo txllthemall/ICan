@@ -5,6 +5,8 @@ import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.ImageFormat
+import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.provider.MediaStore
@@ -18,7 +20,10 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Observer
+import com.ican.camera.processing.ProcessingMode
+import com.ican.camera.processing.ProcessingPipeline
 import com.ican.camera.util.LogUtil
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -32,6 +37,9 @@ class CameraEngine(private val context: Context) {
 
     private val _state = MutableStateFlow(CameraState())
     val state = _state.asStateFlow()
+
+    private val processingPipeline = ProcessingPipeline(context)
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -87,8 +95,6 @@ class CameraEngine(private val context: Context) {
             try {
                 cameraProvider?.unbindAll()
                 
-                // For Phase 2A, we bind both ImageCapture and VideoCapture if possible.
-                // Some devices might have constraints, but CameraX usually handles this.
                 camera = cameraProvider?.bindToLifecycle(
                     lifecycleOwner,
                     cameraSelector,
@@ -139,9 +145,13 @@ class CameraEngine(private val context: Context) {
         if (_state.value.mode == mode) return
         LogUtil.i("VIDEO_MODE_ENTER_REQUESTED")
         _state.update { it.copy(mode = mode) }
-        // Re-binding is handled by the UI or if we need to optimize use cases.
-        // For now, both are bound.
         LogUtil.i("VIDEO_MODE_READY")
+    }
+
+    fun setProcessingMode(mode: ProcessingMode) {
+        if (_state.value.processingMode == mode) return
+        processingPipeline.setMode(mode)
+        _state.update { it.copy(processingMode = mode) }
     }
 
     fun takePhoto() {
@@ -158,6 +168,14 @@ class CameraEngine(private val context: Context) {
         val newCount = inFlightCount.incrementAndGet()
         updateCapturingState(newCount)
 
+        if (_state.value.processingMode == ProcessingMode.NONE) {
+            takeDirectPhoto(imageCapture, tRequested)
+        } else {
+            takeProcessedPhoto(imageCapture, tRequested)
+        }
+    }
+
+    private fun takeDirectPhoto(imageCapture: ImageCapture, tRequested: Long) {
         val name = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(System.currentTimeMillis())
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -171,17 +189,12 @@ class CameraEngine(private val context: Context) {
             .Builder(context.contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
             .build()
 
-        LogUtil.i("IMAGE_SAVE_STARTED")
-        val tSaveStarted = SystemClock.elapsedRealtimeNanos()
-
         imageCapture.takePicture(
             outputOptions,
             cameraExecutor,
             object : ImageCapture.OnImageSavedCallback {
-                private var tCaptureStarted = 0L
-
                 override fun onCaptureStarted() {
-                    tCaptureStarted = SystemClock.elapsedRealtimeNanos()
+                    val tCaptureStarted = SystemClock.elapsedRealtimeNanos()
                     LogUtil.i("CAPTURE_STARTED (Delta Requested: ${(tCaptureStarted - tRequested) / 1_000_000}ms)")
                     decrementInFlight()
                     LogUtil.i("NEXT_CAPTURE_ACCEPTED (Delta Requested: ${(SystemClock.elapsedRealtimeNanos() - tRequested) / 1_000_000}ms)")
@@ -194,14 +207,60 @@ class CameraEngine(private val context: Context) {
 
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val tSaved = SystemClock.elapsedRealtimeNanos()
-                    LogUtil.i("CAPTURE_COMPLETED (Delta Capture: ${(tSaved - tCaptureStarted) / 1_000_000}ms)")
-                    LogUtil.i("IMAGE_SAVED (Total Latency: ${(tSaved - tRequested) / 1_000_000}ms, Save Delta: ${(tSaved - tSaveStarted) / 1_000_000}ms)")
+                    LogUtil.i("IMAGE_SAVED (Total Latency: ${(tSaved - tRequested) / 1_000_000}ms)")
                     
                     _state.update { it.copy(
                         lastThumbnailUri = output.savedUri,
                         lastThumbnailMimeType = "image/jpeg"
                     ) }
                     LogUtil.i("NEXT_SHOT_READY")
+                }
+            }
+        )
+    }
+
+    private fun takeProcessedPhoto(imageCapture: ImageCapture, tRequested: Long) {
+        LogUtil.i("PROCESS_CAPTURE_REQUESTED mode=${_state.value.processingMode}")
+        
+        imageCapture.takePicture(
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureStarted() {
+                    val tCaptureStarted = SystemClock.elapsedRealtimeNanos()
+                    LogUtil.i("CAPTURE_STARTED (Delta Requested: ${(tCaptureStarted - tRequested) / 1_000_000}ms)")
+                    decrementInFlight()
+                    LogUtil.i("NEXT_CAPTURE_ACCEPTED")
+                }
+
+                override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                    LogUtil.i("PROCESS_INPUT_READY")
+                    val strategy = processingPipeline.getPhotoStrategy()
+                    
+                    engineScope.launch {
+                        try {
+                            val result = strategy.processPhoto(imageProxy)
+                            if (result.success) {
+                                _state.update { it.copy(
+                                    lastThumbnailUri = result.outputUri,
+                                    lastThumbnailMimeType = "image/jpeg"
+                                ) }
+                                LogUtil.i("NEXT_SHOT_READY")
+                            } else {
+                                LogUtil.e("Processing failed: ${result.error?.message}")
+                            }
+                        } catch (e: Exception) {
+                            LogUtil.e("Unexpected error in processed path", e)
+                        } finally {
+                            // Close imageProxy is already handled by strategy.processPhoto in try/catch/finally
+                            // but we double check or move it here.
+                            // ImageProxy MUST be closed.
+                        }
+                    }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    LogUtil.e("Photo capture failed", exception)
+                    decrementInFlight()
                 }
             }
         )
@@ -230,6 +289,9 @@ class CameraEngine(private val context: Context) {
         )
             .setContentValues(contentValues)
             .build()
+
+        val strategy = processingPipeline.getVideoStrategy()
+        strategy.configurePipeline()
 
         val recording = videoCapture.output
             .prepareRecording(context, mediaStoreOutput)
@@ -309,7 +371,6 @@ class CameraEngine(private val context: Context) {
     fun setQuality(quality: Quality) {
         if (_state.value.selectedQuality == quality) return
         _state.update { it.copy(selectedQuality = quality, isReady = false) }
-        // Re-binding is required to change quality in VideoCapture
     }
 
     fun setZoom(ratio: Float) {
@@ -328,5 +389,6 @@ class CameraEngine(private val context: Context) {
         activeRecording?.stop()
         cameraProvider?.unbindAll()
         cameraExecutor.shutdown()
+        engineScope.cancel()
     }
 }

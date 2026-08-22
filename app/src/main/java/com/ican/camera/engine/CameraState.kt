@@ -4,6 +4,9 @@ import android.net.Uri
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.video.Quality
+import com.ican.camera.processing.ICanAutoConfig
+import com.ican.camera.processing.ProcessingMode
+import com.ican.camera.profiles.CameraProfile
 
 enum class CameraMode {
     PHOTO, VIDEO
@@ -15,6 +18,9 @@ enum class RecordingState {
 
 data class CameraState(
     val mode: CameraMode = CameraMode.PHOTO,
+    val processingMode: ProcessingMode = ProcessingMode.NONE,
+    val icanAutoConfig: ICanAutoConfig = ICanAutoConfig(),
+    val activeProfile: CameraProfile? = null,
     val isReady: Boolean = false,
     val isCapturing: Boolean = false, // For Photo
     val recordingState: RecordingState = RecordingState.IDLE,

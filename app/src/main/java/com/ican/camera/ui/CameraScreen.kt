@@ -32,6 +32,7 @@ import com.ican.camera.engine.CameraEngine
 import com.ican.camera.engine.CameraMode
 import com.ican.camera.engine.CameraState
 import com.ican.camera.engine.RecordingState
+import com.ican.camera.processing.ProcessingMode
 import com.ican.camera.util.LogUtil
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
@@ -109,6 +110,14 @@ fun CameraScreen(
                 TorchControl(
                     isOn = state.isTorchOn,
                     onToggle = { engine.toggleTorch() }
+                )
+            }
+            
+            // Developer Processing Mode Toggle
+            if (state.mode == CameraMode.PHOTO && state.recordingState == RecordingState.IDLE) {
+                ProcessingModeToggle(
+                    currentMode = state.processingMode,
+                    onModeChange = { engine.setProcessingMode(it) }
                 )
             }
             
@@ -393,10 +402,40 @@ fun QualitySelector(
         qualities.forEach { quality ->
             val isSelected = quality == selected
             Text(
-                text = quality.toString(), // Quality.FHD.toString() -> "FHD" usually
+                text = quality.toString(), 
                 color = if (isSelected) Color.Yellow else Color.White,
                 modifier = Modifier.clickable { onQualityChange(quality) },
                 fontSize = 12.sp,
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+    }
+}
+
+@Composable
+fun ProcessingModeToggle(
+    currentMode: ProcessingMode,
+    onModeChange: (ProcessingMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .padding(top = 8.dp)
+            .clip(CircleShape)
+            .background(Color.DarkGray.copy(alpha = 0.5f))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        ProcessingMode.entries.forEach { mode ->
+            val isSelected = currentMode == mode
+            Text(
+                text = mode.name.replace("ICAN_", ""),
+                color = if (isSelected) Color.Green else Color.White,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (isSelected) Color.White.copy(alpha = 0.2f) else Color.Transparent)
+                    .clickable { onModeChange(mode) }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                fontSize = 10.sp,
                 style = MaterialTheme.typography.labelSmall
             )
         }
