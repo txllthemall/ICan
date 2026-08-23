@@ -12,6 +12,43 @@ class PhysicalCameraMapper(private val context: Context) {
 
     private val report = StringBuilder()
 
+    fun getCameraMap(): Map<RearLens, PhysicalCameraInfo> {
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val cameraIds = cameraManager.cameraIdList
+        val allInfo = mutableListOf<PhysicalCameraInfo>()
+
+        for (id in cameraIds) {
+            val chars = cameraManager.getCameraCharacteristics(id)
+            val facing = chars.get(CameraCharacteristics.LENS_FACING) ?: -1
+            val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.toList() ?: emptyList()
+            val physicalSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+
+            val classification = if (facing == CameraMetadata.LENS_FACING_FRONT) {
+                CameraClassification.FRONT
+            } else {
+                CameraClassification.UNKNOWN
+            }
+
+            allInfo.add(PhysicalCameraInfo(
+                id = id,
+                facing = facing,
+                focalLengths = focalLengths,
+                physicalSize = physicalSize,
+                activeArraySize = activeArray,
+                classification = classification
+            ))
+        }
+
+        val mapped = refineClassifications(cameraManager, allInfo)
+        
+        return mutableMapOf<RearLens, PhysicalCameraInfo>().apply {
+            mapped.find { it.classification == CameraClassification.ULTRAWIDE }?.let { put(RearLens.ULTRAWIDE, it) }
+            mapped.find { it.classification == CameraClassification.MAIN }?.let { put(RearLens.MAIN, it) }
+            mapped.find { it.classification == CameraClassification.TELEPHOTO }?.let { put(RearLens.TELEPHOTO, it) }
+        }
+    }
+
     fun mapCameras() {
         report.clear()
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager

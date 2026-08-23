@@ -10,6 +10,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.provider.MediaStore
+import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -20,6 +23,8 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Observer
+import com.ican.camera.capabilities.PhysicalCameraMapper
+import com.ican.camera.capabilities.RearLens
 import com.ican.camera.processing.ProcessingMode
 import com.ican.camera.processing.ProcessingPipeline
 import com.ican.camera.util.LogUtil
@@ -27,6 +32,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
@@ -39,6 +45,7 @@ class CameraEngine(private val context: Context) {
     val state = _state.asStateFlow()
 
     private val processingPipeline = ProcessingPipeline(context)
+    private val cameraMapper = PhysicalCameraMapper(context)
     private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -50,15 +57,19 @@ class CameraEngine(private val context: Context) {
     
     private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var zoomObserver: Observer<ZoomState>? = null
+    
+    private val lensSelectionResults = mutableMapOf<RearLens, String>()
 
     private val inFlightCount = AtomicInteger(0)
     private val MAX_IN_FLIGHT = 3
 
+    @OptIn(ExperimentalCamera2Interop::class)
     fun bindToLifecycle(
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView
     ) {
-        LogUtil.i("CAMERA_BIND_START")
+        val requestedLens = _state.value.selectedRearLens
+        LogUtil.i("CAMERA_BIND_START lens=$requestedLens")
         _state.update { it.copy(isReady = false) }
         
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -88,13 +99,34 @@ class CameraEngine(private val context: Context) {
                 .build()
             videoCapture = VideoCapture.withOutput(recorder)
 
-            val cameraSelector = CameraSelector.Builder()
-                .requireLensFacing(_state.value.lensFacing)
-                .build()
+            val lensFacing = _state.value.lensFacing
+            val cameraSelectorBuilder = CameraSelector.Builder()
+                .requireLensFacing(lensFacing)
+
+            val cameraMap = cameraMapper.getCameraMap()
+            val targetInfo = if (lensFacing == CameraSelector.LENS_FACING_BACK) cameraMap[requestedLens] else null
+            
+            if (targetInfo != null) {
+                val targetId = targetInfo.id
+                LogUtil.d("Targeting physical camera ID: $targetId for $requestedLens")
+                cameraSelectorBuilder.addCameraFilter { cameraInfos ->
+                    cameraInfos.filter { info ->
+                        Camera2CameraInfo.from(info).cameraId == targetId
+                    }
+                }
+            }
+
+            val cameraSelector = cameraSelectorBuilder.build()
 
             try {
                 cameraProvider?.unbindAll()
                 
+                // Get candidate IDs for debugging
+                val candidates = cameraProvider?.availableCameraInfos
+                    ?.filter { it.lensFacing == lensFacing }
+                    ?.map { Camera2CameraInfo.from(it).cameraId }
+                    ?: emptyList()
+
                 camera = cameraProvider?.bindToLifecycle(
                     lifecycleOwner,
                     cameraSelector,
@@ -110,6 +142,8 @@ class CameraEngine(private val context: Context) {
                 val initialQuality = if (supportedQualities.contains(Quality.FHD)) Quality.FHD 
                                      else supportedQualities.firstOrNull() ?: Quality.SD
 
+                val boundId = camera?.cameraInfo?.let { Camera2CameraInfo.from(it).cameraId } ?: "UNKNOWN"
+
                 _state.update { it.copy(
                     isReady = true,
                     hasFlash = capabilities?.hasFlash ?: false,
@@ -119,10 +153,14 @@ class CameraEngine(private val context: Context) {
                     minZoomRatio = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1.0f,
                     maxZoomRatio = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1.0f
                 ) }
-                LogUtil.i("CAMERA_READY")
+                LogUtil.i("CAMERA_READY boundId=$boundId")
+                
+                generateLensSelectionReport(requestedLens, targetInfo?.id, candidates, boundId, null)
+                
             } catch (exc: Exception) {
                 LogUtil.e("Use case binding failed", exc)
                 _state.update { it.copy(error = exc.message) }
+                generateLensSelectionReport(requestedLens, targetInfo?.id, emptyList(), "NONE", exc.message)
             }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -152,6 +190,11 @@ class CameraEngine(private val context: Context) {
         if (_state.value.processingMode == mode) return
         processingPipeline.setMode(mode)
         _state.update { it.copy(processingMode = mode) }
+    }
+
+    fun setRearLens(lens: RearLens) {
+        if (_state.value.selectedRearLens == lens) return
+        _state.update { it.copy(selectedRearLens = lens, isReady = false) }
     }
 
     fun takePhoto() {
@@ -250,10 +293,6 @@ class CameraEngine(private val context: Context) {
                             }
                         } catch (e: Exception) {
                             LogUtil.e("Unexpected error in processed path", e)
-                        } finally {
-                            // Close imageProxy is already handled by strategy.processPhoto in try/catch/finally
-                            // but we double check or move it here.
-                            // ImageProxy MUST be closed.
                         }
                     }
                 }
@@ -354,7 +393,7 @@ class CameraEngine(private val context: Context) {
         } else {
             CameraSelector.LENS_FACING_BACK
         }
-        _state.update { it.copy(lensFacing = newLensFacing, isReady = false) }
+        _state.update { it.copy(lensFacing = newLensFacing, isReady = false, selectedRearLens = RearLens.MAIN) }
     }
 
     fun setFlashMode(flashMode: Int) {
@@ -383,6 +422,61 @@ class CameraEngine(private val context: Context) {
             .setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS)
             .build()
         camera?.cameraControl?.startFocusAndMetering(action)
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun generateLensSelectionReport(
+        requested: RearLens,
+        resolvedId: String?,
+        candidates: List<String>,
+        boundId: String,
+        exception: String?
+    ) {
+        // Only record results for rear camera bindings
+        if (resolvedId != null) {
+            val cameraMap = cameraMapper.getCameraMap()
+            val mappedInfo = cameraMap.values.find { it.id == boundId }
+
+            val entry = StringBuilder()
+            entry.append("$requested:\n")
+            entry.append("- Requested Semantic Lens: $requested\n")
+            entry.append("- Target Physical ID: $resolvedId\n")
+            entry.append("- Candidate IDs: ${candidates.joinToString()}\n")
+            entry.append("- Actually Bound ID: $boundId\n")
+            entry.append("- Focal Length: ${mappedInfo?.focalLengths?.firstOrNull() ?: "UNKNOWN"} mm\n")
+            entry.append("- Sensor Physical Size: ${mappedInfo?.physicalSize ?: "UNKNOWN"}\n")
+            entry.append("- Bind Success: ${exception == null}\n")
+            if (exception != null) {
+                entry.append("- Exception: $exception\n")
+            }
+            
+            lensSelectionResults[requested] = entry.toString()
+        }
+
+        // Build the cumulative report
+        val reportBuilder = StringBuilder()
+        reportBuilder.append("=== ICAN PHYSICAL LENS SELECTION ===\n\n")
+        
+        RearLens.entries.forEach { lens ->
+            val result = lensSelectionResults[lens]
+            if (result != null) {
+                reportBuilder.append(result).append("\n")
+            } else {
+                reportBuilder.append("$lens: NOT TESTED YET\n\n")
+            }
+        }
+        
+        reportBuilder.append("=== END ===\n")
+        
+        val finalReport = reportBuilder.toString()
+        LogUtil.i(finalReport)
+        
+        try {
+            val file = File(context.cacheDir, "ican_physical_lens_selection.txt")
+            file.writeText(finalReport)
+        } catch (e: Exception) {
+            LogUtil.e("Failed to write lens selection report", e)
+        }
     }
 
     fun release() {

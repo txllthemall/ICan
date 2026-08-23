@@ -33,6 +33,7 @@ import com.ican.camera.engine.CameraMode
 import com.ican.camera.engine.CameraState
 import com.ican.camera.engine.RecordingState
 import com.ican.camera.processing.ProcessingMode
+import com.ican.camera.capabilities.RearLens
 import com.ican.camera.util.LogUtil
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
@@ -119,6 +120,13 @@ fun CameraScreen(
                     currentMode = state.processingMode,
                     onModeChange = { engine.setProcessingMode(it) }
                 )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                RearLensSelector(
+                    currentLens = state.selectedRearLens,
+                    onLensChange = { engine.setRearLens(it) }
+                )
             }
             
             if (state.mode == CameraMode.VIDEO && state.recordingState == RecordingState.IDLE) {
@@ -190,14 +198,19 @@ fun CameraScreen(
             )
         }
 
-        // Re-bind when lens, quality or lifecycle changes
+        // Re-bind when lens, quality, rear lens or lifecycle changes
         var currentLensFacing by remember { mutableIntStateOf(state.lensFacing) }
         var currentQuality by remember { mutableStateOf(state.selectedQuality) }
+        var currentRearLens by remember { mutableStateOf(state.selectedRearLens) }
         
-        LaunchedEffect(state.lensFacing, state.selectedQuality, lifecycleOwner) {
-            if (currentLensFacing != state.lensFacing || currentQuality != state.selectedQuality) {
+        LaunchedEffect(state.lensFacing, state.selectedQuality, state.selectedRearLens, lifecycleOwner) {
+            if (currentLensFacing != state.lensFacing || 
+                currentQuality != state.selectedQuality ||
+                currentRearLens != state.selectedRearLens) {
+                
                 currentLensFacing = state.lensFacing
                 currentQuality = state.selectedQuality
+                currentRearLens = state.selectedRearLens
                 previewView?.let { engine.bindToLifecycle(lifecycleOwner, it) }
             }
         }
@@ -436,6 +449,40 @@ fun ProcessingModeToggle(
                     .clickable { onModeChange(mode) }
                     .padding(horizontal = 8.dp, vertical = 4.dp),
                 fontSize = 10.sp,
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+    }
+}
+
+@Composable
+fun RearLensSelector(
+    currentLens: RearLens,
+    onLensChange: (RearLens) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.5f))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        RearLens.entries.forEach { lens ->
+            val isSelected = currentLens == lens
+            val label = when(lens) {
+                RearLens.ULTRAWIDE -> "UW"
+                RearLens.MAIN -> "MAIN"
+                RearLens.TELEPHOTO -> "TELE"
+            }
+            Text(
+                text = label,
+                color = if (isSelected) Color.Yellow else Color.White,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (isSelected) Color.White.copy(alpha = 0.2f) else Color.Transparent)
+                    .clickable { onLensChange(lens) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                fontSize = 12.sp,
                 style = MaterialTheme.typography.labelSmall
             )
         }

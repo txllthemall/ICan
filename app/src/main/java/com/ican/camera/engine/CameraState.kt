@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.video.Quality
+import com.ican.camera.capabilities.RearLens
 import com.ican.camera.processing.ICanAutoConfig
 import com.ican.camera.processing.ProcessingMode
 import com.ican.camera.profiles.CameraProfile
@@ -18,6 +19,7 @@ enum class RecordingState {
 
 data class CameraState(
     val mode: CameraMode = CameraMode.PHOTO,
+    val selectedRearLens: RearLens = RearLens.MAIN,
     val processingMode: ProcessingMode = ProcessingMode.NONE,
     val icanAutoConfig: ICanAutoConfig = ICanAutoConfig(),
     val activeProfile: CameraProfile? = null,

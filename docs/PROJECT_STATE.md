@@ -138,8 +138,36 @@ discover the actual Camera2 / CameraX capabilities exposed by the connected OneP
 - Integrated into `MainActivity` startup.
 
 ### Phase 2D.2 — Physical Camera Mapping
-**Status: IN PROGRESS**
+**Status: COMPLETED**
 - Implementation of `PhysicalCameraMapper` to classify logical and physical cameras.
 - Semantic classification: FRONT, MAIN, ULTRAWIDE, TELEPHOTO.
 - Deterministic focal-length based sorting for rear multi-camera systems.
 - Report logged and saved to app cache.
+
+### Phase 2D.3 — Physical Lens Selection
+**Status: COMPLETED**
+- Implementation of physical lens selection for rear photography.
+- Support for UW, MAIN, and TELE lenses via CameraX `addCameraFilter`.
+- Verified runtime results on OnePlus 15 CPH2745:
+  - ULTRAWIDE
+    - Target Physical ID: 3
+    - Actually Bound ID: 3
+    - Focal Length: 2.31 mm
+    - Sensor Physical Size: 5.013504 x 3.760128
+    - Bind Success: true
+  - MAIN
+    - Target Physical ID: 2
+    - Actually Bound ID: 2
+    - Focal Length: 5.59 mm
+    - Sensor Physical Size: 8.192 x 6.144
+    - Bind Success: true
+  - TELEPHOTO
+    - Target Physical ID: 4
+    - Actually Bound ID: 4
+    - Focal Length: 12.19 mm
+    - Sensor Physical Size: 5.24288 x 3.93216
+    - Bind Success: true
+- Physical-device validation confirmed:
+  - Field of view changes correctly between UW / MAIN / TELE.
+  - Photo capture works after physical lens rebinding.
+  - Binding is performed to the actual resolved physical Camera2 IDs, not digital crop/zoom.
