@@ -205,3 +205,31 @@ discover the actual Camera2 / CameraX capabilities exposed by the connected OneP
     - YUV_420_888 reports SRGB
     - JPEG reports SRGB
 - **Engineering Note**: Advertised capability does NOT automatically mean a complete recording configuration is operational. High-speed and HDR combinations must be validated with real capture sessions before being exposed to users.
+
+### Phase 2D.5 — Video Configuration Capability & Session Validation
+**Status: COMPLETED**
+- Implementation of `VideoConfigurationValidator` to discover and verify high-speed and HDR configurations.
+- Refined as a non-invasive diagnostic component.
+- VERIFIED on OnePlus 15 CPH2745 (MAIN camera):
+  - **Advertised by Camera2**: 1080p60, 4K30, 1080p120 HS, 1080p240 HS, 4K120 HS, HLG10.
+  - **Session Creation Succeeded**: All six selected MAIN configurations successfully reached `onConfigured` state in Camera2.
+  - **Feasibility established**: STANDARD, HIGH_SPEED, and HLG10 session configurations are functional on the hardware.
+- NOT YET VERIFIED:
+  - Production encoded recording for every experimental configuration.
+  - Actual 1080p120 / 240 encoded output.
+  - Actual 4K120 encoded output.
+  - Actual HLG10 encoded output (bit-depth/profile correctness).
+- **Engineering Note**: Encoded video validation was intentionally deferred to the future production video-settings / recording implementation rather than maintaining a separate temporary diagnostic recording stack. 4K120, 240 fps, and HDR modes are not yet marked production-ready.
+
+### Phase 2E — RAW / Manual Sensor Foundation
+**Status: PLANNED**
+- Planned goals:
+  - public Camera2 RAW_SENSOR validation
+  - DNG capture
+  - ISO range and manual ISO control
+  - exposure-time control
+  - manual focus-distance control
+  - AE/AWB lock capabilities
+  - exposure compensation
+  - per-physical-camera manual capability validation
+  - foundation for future computational photography / ICan Auto

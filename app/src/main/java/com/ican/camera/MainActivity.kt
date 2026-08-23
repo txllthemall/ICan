@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ican.camera.capabilities.CameraCapabilityProbe
 import com.ican.camera.capabilities.PhysicalCameraMapper
 import com.ican.camera.capabilities.StreamCapabilityProbe
+import com.ican.camera.capabilities.VideoConfigurationValidator
 import com.ican.camera.engine.CameraEngine
 import com.ican.camera.ui.CameraScreen
 import com.ican.camera.ui.theme.ICanTheme
@@ -45,10 +46,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         LogUtil.i("APP_CAMERA_START")
         
-        // Trigger Device Capability Probe
+        // 1. Device Identity & Basic Probe
         CameraCapabilityProbe(this).runProbe()
+        
+        // 2. Physical Lens Mapping
         PhysicalCameraMapper(this).mapCameras()
+        
+        // 3. Stream & FPS Capability Probe
         StreamCapabilityProbe(this).runProbe()
+        
+        // 4. Video Configuration Initial Discovery (Advertised only)
+        VideoConfigurationValidator(this).runInitialDiscovery()
         
         cameraEngine = CameraEngine(this)
         
@@ -96,7 +104,6 @@ class MainActivity : ComponentActivity() {
                 val micPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { _ ->
-                    // State will be updated by CameraEngine via permission check or we can update a state here
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -109,8 +116,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         } else {
-                            // Check if we've already asked and been denied without rationale
-                            // This is a rough heuristic for "permanently denied"
                             PermissionScreen(
                                 isPermanentlyDenied = !shouldShowRationale,
                                 onPermissionRequest = {
