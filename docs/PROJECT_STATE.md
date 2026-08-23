@@ -261,7 +261,7 @@ discover the actual Camera2 / CameraX capabilities exposed by the connected OneP
 - **Note**: Manual controls, RAW processing, and computational RAW pipelines are deferred to future subphases.
 
 ### Phase 2E.2 — Manual Sensor Controls
-**Status: PLANNED**
+**Status: COMPLETED**
 - Planned scope:
   - Manual ISO
   - Manual exposure time
@@ -272,3 +272,47 @@ discover the actual Camera2 / CameraX capabilities exposed by the connected OneP
   - Capability-driven limits
   - Per-physical-camera validation
   - Foundation for controlled multi-frame capture
+
+### Phase 2E.2A — Manual Sensor Capability Probe
+**Status: COMPLETED**
+- Implementation of `ManualSensorCapabilityProbe` to discover Camera2 manual sensor limits.
+- Inspection of ISO range, exposure time range, and manual sensor capabilities.
+- Collection of exposure compensation limits, AE/AWB lock support, and focus/lens metadata.
+- Reporting of RAW sensor details (white level, black level, CFA) for future computational work.
+- Integrated into development startup sequence.
+- Verified on OnePlus 15 CPH2745 (camera ID 0 = LOGICAL REAR).
+
+### Phase 2E.2B — Manual Sensor Control Core
+**Status: COMPLETED**
+- Implementation of `ManualSensorController` to apply Camera2 capture request options via CameraX interop.
+- Support for AUTO/MANUAL exposure (ISO, Shutter Speed) and focus (Diopters).
+- Support for AE/AWB lock and exposure compensation.
+- Capability-driven limits and safety clamping.
+- Isolated from VIDEO mode to prevent regressions.
+- Minimal developer UI (PRO CORE) added for photo-mode validation.
+- Physically verified behavior on OnePlus 15 CPH2745:
+  - **MANUAL EXPOSURE**:
+    - Runtime Camera2 manual ISO and exposure-time control works.
+    - Manual exposure uses `CONTROL_AE_MODE = OFF`.
+    - Requested values confirmed through real `CaptureResult` metadata (e.g., Requested ISO: 3200, Observed ISO: 3200).
+    - Observed: `AE Mode: OFF`, `AE State: INACTIVE`.
+  - **MANUAL FOCUS**:
+    - Runtime manual focus-distance control works.
+    - Manual focus uses `CONTROL_AF_MODE = OFF`.
+    - Requested focus distance confirmed through `CaptureResult` (e.g., Requested: 10.0 D, Observed: 9.999999 D).
+    - Observed: `AF Mode: OFF`, `AF State: INACTIVE`.
+  - **AUTO RESTORATION**:
+    - `MANUAL -> AUTO` exposure and `MANUAL_FOCUS -> AUTO_FOCUS` restoration works.
+    - Automatic exposure resumes selecting its own ISO/exposure values.
+    - PHOTO autofocus restores `CONTINUOUS_PICTURE`.
+    - Tap-to-focus remains functional.
+  - **AE/AWB LOCK + EV**:
+    - Physically smoke-tested successfully.
+    - EV compensation works in AUTO exposure.
+    - AE lock and AWB lock work as expected.
+- **Architecture Note**: Manual controls use a centralized `ManualSensorController`. Limits remain capability-driven per active physical camera. One coherent `CaptureRequestOptions` bundle represents current manual state. Actual `CaptureResult` telemetry is available for validation.
+- **Note**: Final Pro UI, manual Kelvin/tint, and computational features are deferred to later phases.
+
+### Phase 2E.3 — Controlled Multi-Frame Capture Foundation
+**Status: PLANNED**
+- Foundation for controlled multi-frame capture.

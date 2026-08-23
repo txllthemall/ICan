@@ -6,12 +6,19 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.provider.MediaStore
 import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -25,6 +32,11 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Observer
 import com.ican.camera.capabilities.PhysicalCameraMapper
 import com.ican.camera.capabilities.RearLens
+import com.ican.camera.manual.ExposureMode
+import com.ican.camera.manual.FocusMode
+import com.ican.camera.manual.ManualSensorController
+import com.ican.camera.manual.ManualSensorState
+import com.ican.camera.manual.ObservedSensorState
 import com.ican.camera.processing.ProcessingMode
 import com.ican.camera.processing.ProcessingPipeline
 import com.ican.camera.util.LogUtil
@@ -47,6 +59,7 @@ class CameraEngine(private val context: Context) {
 
     private val processingPipeline = ProcessingPipeline(context)
     private val cameraMapper = PhysicalCameraMapper(context)
+    private val manualController = ManualSensorController(context)
     private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -82,12 +95,41 @@ class CameraEngine(private val context: Context) {
                 .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
                 .build()
 
-            preview = Preview.Builder()
+            val previewBuilder = Preview.Builder()
                 .setResolutionSelector(resolutionSelector)
-                .build()
-                .also {
-                    it.surfaceProvider = previewView.surfaceProvider
+
+            // Add CaptureResult observer
+            val captureCallback = object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    result: TotalCaptureResult
+                ) {
+                    val observed = ObservedSensorState(
+                        iso = result.get(CaptureResult.SENSOR_SENSITIVITY),
+                        exposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                        focusDistanceDiopters = result.get(CaptureResult.LENS_FOCUS_DISTANCE),
+                        aeMode = result.get(CaptureResult.CONTROL_AE_MODE),
+                        aeState = result.get(CaptureResult.CONTROL_AE_STATE),
+                        awbMode = result.get(CaptureResult.CONTROL_AWB_MODE),
+                        awbState = result.get(CaptureResult.CONTROL_AWB_STATE),
+                        afMode = result.get(CaptureResult.CONTROL_AF_MODE),
+                        afState = result.get(CaptureResult.CONTROL_AF_STATE)
+                    )
+                    
+                    // Throttle state update
+                    if (shouldUpdateObservedState(observed)) {
+                        _state.update { it.copy(observedSensorState = observed) }
+                    }
+                    
+                    manualController.onCaptureResult(observed)
                 }
+            }
+            Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(captureCallback)
+            
+            preview = previewBuilder.build().also {
+                it.surfaceProvider = previewView.surfaceProvider
+            }
 
             val lensFacing = _state.value.lensFacing
             val cameraSelectorBuilder = CameraSelector.Builder()
@@ -161,6 +203,8 @@ class CameraEngine(private val context: Context) {
 
                 val boundId = camera?.cameraInfo?.let { Camera2CameraInfo.from(it).cameraId } ?: "UNKNOWN"
 
+                val limits = manualController.updateLimits(boundId)
+
                 _state.update { it.copy(
                     isReady = true,
                     isRawSupported = rawSupported,
@@ -170,9 +214,17 @@ class CameraEngine(private val context: Context) {
                     supportedQualities = supportedQualities,
                     selectedQuality = initialQuality,
                     minZoomRatio = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1.0f,
-                    maxZoomRatio = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1.0f
+                    maxZoomRatio = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1.0f,
+                    manualLimits = limits
                 ) }
                 LogUtil.i("CAMERA_READY boundId=$boundId RAW_JPEG=$useRaw")
+                
+                if (_state.value.mode == CameraMode.PHOTO) {
+                    manualController.applyState(camera!!.cameraControl, _state.value.manualSensorState, requestedLens)
+                } else {
+                    // Ensure manual overrides are cleared in VIDEO
+                    Camera2CameraControl.from(camera!!.cameraControl).setCaptureRequestOptions(CaptureRequestOptions.Builder().build())
+                }
                 
                 generateLensSelectionReport(requestedLens, targetInfo?.id, candidates, boundId, null)
                 
@@ -182,6 +234,16 @@ class CameraEngine(private val context: Context) {
                 generateLensSelectionReport(requestedLens, targetInfo?.id, emptyList(), "NONE", exc.message)
             }
         }, ContextCompat.getMainExecutor(context))
+    }
+
+    private var lastObservedUpdateTime = 0L
+    private fun shouldUpdateObservedState(new: ObservedSensorState): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastObservedUpdateTime > 1000) { // Update state at most once per second
+            lastObservedUpdateTime = now
+            return true
+        }
+        return false
     }
 
     private fun setupCameraObservers(lifecycleOwner: LifecycleOwner) {
@@ -198,11 +260,17 @@ class CameraEngine(private val context: Context) {
         camera?.cameraInfo?.zoomState?.observe(lifecycleOwner, observer)
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
     fun setCameraMode(mode: CameraMode) {
         if (_state.value.mode == mode) return
-        LogUtil.i("VIDEO_MODE_ENTER_REQUESTED")
+        LogUtil.i("CAMERA_MODE_SWITCH to $mode")
+        
+        if (mode == CameraMode.VIDEO && camera != null) {
+            // Clear manual overrides before entering VIDEO
+            Camera2CameraControl.from(camera!!.cameraControl).setCaptureRequestOptions(CaptureRequestOptions.Builder().build())
+        }
+        
         _state.update { it.copy(mode = mode) }
-        LogUtil.i("VIDEO_MODE_READY")
     }
 
     fun setProcessingMode(mode: ProcessingMode) {
@@ -219,6 +287,17 @@ class CameraEngine(private val context: Context) {
     fun setRawCaptureEnabled(enabled: Boolean) {
         if (_state.value.isRawCaptureEnabled == enabled) return
         _state.update { it.copy(isRawCaptureEnabled = enabled, isReady = false) }
+    }
+
+    fun setManualSensorState(newState: ManualSensorState) {
+        _state.update { it.copy(manualSensorState = newState) }
+        if (_state.value.mode == CameraMode.PHOTO && camera != null) {
+            manualController.applyState(camera!!.cameraControl, newState, _state.value.selectedRearLens)
+        }
+    }
+
+    fun toggleManualControls() {
+        _state.update { it.copy(isManualControlsVisible = !it.isManualControlsVisible) }
     }
 
     fun takePhoto() {

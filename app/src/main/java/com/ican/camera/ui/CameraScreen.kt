@@ -32,6 +32,9 @@ import com.ican.camera.engine.CameraEngine
 import com.ican.camera.engine.CameraMode
 import com.ican.camera.engine.CameraState
 import com.ican.camera.engine.RecordingState
+import com.ican.camera.manual.ExposureMode
+import com.ican.camera.manual.FocusMode
+import com.ican.camera.manual.ManualSensorState
 import com.ican.camera.processing.ProcessingMode
 import com.ican.camera.capabilities.RearLens
 import com.ican.camera.util.LogUtil
@@ -135,7 +138,26 @@ fun CameraScreen(
                         onToggle = { engine.setRawCaptureEnabled(it) }
                     )
                 }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                ManualControlsToggle(
+                    visible = state.isManualControlsVisible,
+                    onToggle = { engine.toggleManualControls() }
+                )
             }
+        }
+
+        // Middle UI: Manual Controls Panel
+        if (state.mode == CameraMode.PHOTO && state.isManualControlsVisible) {
+            ManualControlsPanel(
+                state = state.manualSensorState,
+                limits = state.manualLimits,
+                onStateChange = { engine.setManualSensorState(it) },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 16.dp)
+            )
         }
 
         // Middle UI: Recording Timer
@@ -217,6 +239,143 @@ fun CameraScreen(
                 currentRawEnabled = state.isRawCaptureEnabled
                 
                 previewView?.let { engine.bindToLifecycle(lifecycleOwner, it) }
+            }
+        }
+    }
+}
+
+@Composable
+fun ManualControlsToggle(visible: Boolean, onToggle: () -> Unit) {
+    Button(
+        onClick = onToggle,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (visible) Color.Cyan else Color.Gray.copy(alpha = 0.5f),
+            contentColor = if (visible) Color.Black else Color.White
+        ),
+        modifier = Modifier.height(32.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+    ) {
+        Text("PRO CORE", fontSize = 10.sp)
+    }
+}
+
+@Composable
+fun ManualControlsPanel(
+    state: ManualSensorState,
+    limits: com.ican.camera.manual.ManualLimits,
+    onStateChange: (ManualSensorState) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.7f)),
+        modifier = modifier.width(180.dp)
+    ) {
+        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Exposure Mode
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("EXP", color = Color.White, fontSize = 10.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(ExposureMode.AUTO, ExposureMode.MANUAL).forEach { mode ->
+                        Text(
+                            text = mode.name,
+                            color = if (state.exposureMode == mode) Color.Yellow else Color.White,
+                            modifier = Modifier.clickable { onStateChange(state.copy(exposureMode = mode)) },
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
+            if (state.exposureMode == ExposureMode.MANUAL) {
+                // ISO Presets
+                Column {
+                    Text("ISO", color = Color.Gray, fontSize = 9.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(100, 400, 1600, 3200).forEach { iso ->
+                            val valid = iso in limits.isoRange
+                            Text(
+                                text = iso.toString(),
+                                color = if (state.iso == iso) Color.Yellow else if (valid) Color.White else Color.DarkGray,
+                                modifier = Modifier.clickable(enabled = valid) { onStateChange(state.copy(iso = iso)) },
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+                // Shutter Presets
+                Column {
+                    Text("SHUTTER", color = Color.Gray, fontSize = 9.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        mapOf("1/1000" to 1000000L, "1/100" to 10000000L, "1/10" to 100000000L, "1s" to 1000000000L).forEach { (label, ns) ->
+                            val valid = ns in limits.exposureTimeRange
+                            Text(
+                                text = label,
+                                color = if (state.exposureTimeNs == ns) Color.Yellow else if (valid) Color.White else Color.DarkGray,
+                                modifier = Modifier.clickable(enabled = valid) { onStateChange(state.copy(exposureTimeNs = ns)) },
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            } else {
+                // EV Comp
+                Column {
+                    Text("EV", color = Color.Gray, fontSize = 9.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        listOf(-2f, 0f, 2f).forEach { ev ->
+                            Text(
+                                text = if (ev > 0) "+$ev" else ev.toString(),
+                                color = if (state.exposureCompensationEv == ev) Color.Yellow else Color.White,
+                                modifier = Modifier.clickable { onStateChange(state.copy(exposureCompensationEv = ev)) },
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Focus Mode
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("FOCUS", color = Color.White, fontSize = 10.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(FocusMode.AUTO, FocusMode.MANUAL).forEach { mode ->
+                        Text(
+                            text = mode.name,
+                            color = if (state.focusMode == mode) Color.Yellow else Color.White,
+                            modifier = Modifier.clickable { onStateChange(state.copy(focusMode = mode)) },
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
+            if (state.focusMode == FocusMode.MANUAL) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    mapOf("INF" to 0f, "MID" to limits.minFocusDistance/2f, "NEAR" to limits.minFocusDistance).forEach { (label, d) ->
+                        Text(
+                            text = label,
+                            color = if (state.focusDistanceDiopters == d) Color.Yellow else Color.White,
+                            modifier = Modifier.clickable { onStateChange(state.copy(focusDistanceDiopters = d)) },
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
+            // Locks
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    "AE L",
+                    color = if (state.aeLocked) Color.Red else Color.White,
+                    modifier = Modifier.clickable { onStateChange(state.copy(aeLocked = !state.aeLocked)) },
+                    fontSize = 10.sp
+                )
+                Text(
+                    "AWB L",
+                    color = if (state.awbLocked) Color.Red else Color.White,
+                    modifier = Modifier.clickable { onStateChange(state.copy(awbLocked = !state.awbLocked)) },
+                    fontSize = 10.sp
+                )
             }
         }
     }

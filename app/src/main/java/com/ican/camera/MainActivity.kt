@@ -30,6 +30,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ican.camera.capabilities.CameraCapabilityProbe
+import com.ican.camera.capabilities.ManualSensorCapabilityProbe
 import com.ican.camera.capabilities.PhysicalCameraMapper
 import com.ican.camera.capabilities.StreamCapabilityProbe
 import com.ican.camera.capabilities.VideoConfigurationValidator
@@ -55,7 +56,10 @@ class MainActivity : ComponentActivity() {
         // 3. Stream & FPS Capability Probe
         StreamCapabilityProbe(this).runProbe()
         
-        // 4. Video Configuration Initial Discovery (Advertised only)
+        // 4. Manual Sensor Capability Probe
+        ManualSensorCapabilityProbe(this).runProbe()
+        
+        // 5. Video Configuration Initial Discovery (Advertised only)
         VideoConfigurationValidator(this).runInitialDiscovery()
         
         cameraEngine = CameraEngine(this)
