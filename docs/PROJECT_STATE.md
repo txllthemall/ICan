@@ -171,3 +171,37 @@ discover the actual Camera2 / CameraX capabilities exposed by the connected OneP
   - Field of view changes correctly between UW / MAIN / TELE.
   - Photo capture works after physical lens rebinding.
   - Binding is performed to the actual resolved physical Camera2 IDs, not digital crop/zoom.
+
+### Phase 2D.4 — Stream / FPS / Stabilization / Dynamic Range Probe
+**Status: COMPLETED**
+- Implementation of `StreamCapabilityProbe` to discover real Camera2 capabilities.
+- Inspection of AE FPS ranges, high-speed video support, and stabilization modes.
+- Collection of dynamic range profiles (API 33+) and color space profiles (API 34+).
+- Integrated into development startup sequence.
+- Verified runtime results on OnePlus 15 CPH2745:
+  - **MAIN / physical ID 2**:
+    - normal 4K up to 30 fps
+    - normal 1440p / 1080p up to 60 fps
+    - constrained high-speed 4K up to 120 fps
+    - constrained high-speed 1080p up to 240 fps
+  - **ULTRAWIDE / physical ID 3**:
+    - normal 4K up to 30 fps
+    - normal 1440p / 1080p up to 60 fps
+    - constrained high-speed 1080p up to 240 fps
+  - **TELEPHOTO / physical ID 4**:
+    - normal 4K up to 30 fps
+    - normal 1440p / 1080p up to 60 fps
+    - constrained high-speed 1080p up to 240 fps
+  - **FRONT / ID 1**:
+    - normal streams up to 60 fps
+    - no constrained high-speed configurations reported
+  - **All exposed cameras report**:
+    - video stabilization OFF / ON / PREVIEW_STABILIZATION
+    - optical stabilization exposed only as OFF
+    - dynamic range: STANDARD, HLG10, HDR10, HDR10_PLUS, DOLBY_VISION_10B_HDR_OEM
+    - STREAM_USE_CASE support
+  - **Color-space probe confirmed**:
+    - PRIVATE output supports SRGB and BT2020_HLG
+    - YUV_420_888 reports SRGB
+    - JPEG reports SRGB
+- **Engineering Note**: Advertised capability does NOT automatically mean a complete recording configuration is operational. High-speed and HDR combinations must be validated with real capture sessions before being exposed to users.

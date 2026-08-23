@@ -31,6 +31,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ican.camera.capabilities.CameraCapabilityProbe
 import com.ican.camera.capabilities.PhysicalCameraMapper
+import com.ican.camera.capabilities.StreamCapabilityProbe
 import com.ican.camera.engine.CameraEngine
 import com.ican.camera.ui.CameraScreen
 import com.ican.camera.ui.theme.ICanTheme
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
         // Trigger Device Capability Probe
         CameraCapabilityProbe(this).runProbe()
         PhysicalCameraMapper(this).mapCameras()
+        StreamCapabilityProbe(this).runProbe()
         
         cameraEngine = CameraEngine(this)
         
