@@ -20,9 +20,14 @@ enum class RecordingState {
     IDLE, STARTING, RECORDING, STOPPING, FINALIZING, ERROR
 }
 
+enum class BracketState {
+    IDLE, PREPARING, CAPTURING_MINUS, CAPTURING_BASE, CAPTURING_PLUS, RESTORING, COMPLETE, FAILED
+}
+
 data class CameraState(
     val mode: CameraMode = CameraMode.PHOTO,
     val selectedRearLens: RearLens = RearLens.MAIN,
+    val bracketState: BracketState = BracketState.IDLE,
     val manualSensorState: ManualSensorState = ManualSensorState(),
     val observedSensorState: ObservedSensorState = ObservedSensorState(),
     val manualLimits: ManualLimits = ManualLimits(),

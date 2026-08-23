@@ -314,5 +314,33 @@ discover the actual Camera2 / CameraX capabilities exposed by the connected OneP
 - **Note**: Final Pro UI, manual Kelvin/tint, and computational features are deferred to later phases.
 
 ### Phase 2E.3 — Controlled Multi-Frame Capture Foundation
-**Status: PLANNED**
+**Status: IN PROGRESS**
 - Foundation for controlled multi-frame capture.
+
+### Phase 2E.3A — Controlled Exposure Bracketing
+**Status: COMPLETED**
+- Implementation of `ExposureBracketController` to capture deterministic 3-frame sets (-2, 0, +2 EV).
+- Use of existing `ManualSensorController` to freeze baseline exposure/focus/AWB.
+- Deterministic sequencing: Apply -> Confirm (via `CaptureResult`) -> Capture.
+- Baseline derived from stable AUTO exposure metadata.
+- Brackets saved to `DCIM/ICan/Brackets/<setId>/`.
+- Deterministic diagnostic report `ican_bracket_validation.txt`.
+- Minimal developer UI for triggering and monitoring bracket status.
+- Physically verified results on OnePlus 15 CPH2745:
+  - **Bracket Set**: 20260823_080414
+  - **Baseline**: Observed ISO: 3758, Observed Exposure: 11217138 ns, Focus: 2.224308 D
+  - **-2 EV frame**: Requested ISO: 3758, Requested Exposure: 2804284 ns | Observed ISO: 3758, Observed Exposure: 2804281 ns | Actual EV Offset: -2.00 | Capture: SUCCESS
+  - **0 EV frame**: Requested ISO: 3758, Requested Exposure: 11217138 ns | Observed ISO: 3758, Observed Exposure: 11217127 ns | Actual EV Offset: 0.00 | Capture: SUCCESS
+  - **+2 EV frame**: Requested ISO: 3758, Requested Exposure: 44868552 ns | Observed ISO: 3758, Observed Exposure: 44868508 ns | Actual EV Offset: +2.00 | Capture: SUCCESS
+- **Engineering Conclusions**:
+  - All three frames were captured from one continuous CameraX session.
+  - The same `ImageCapture` instance was reused.
+  - ISO remained constant across the bracket.
+  - Exposure time produced the intended -2 / 0 / +2 EV offsets.
+  - `CaptureResult` confirmed actual hardware exposure before each shutter.
+  - No arbitrary sleeps were required and no CameraX rebind occurred between frames.
+  - Deterministic three-frame exposure bracketing is now physically verified.
+
+### Phase 2E.3B — Multi-Frame Alignment Input Foundation
+**Status: PLANNED**
+- Planned purpose: Prepare bracket frames for motion/alignment analysis before HDR fusion.

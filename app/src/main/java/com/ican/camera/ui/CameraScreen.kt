@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.ican.camera.engine.BracketState
 import com.ican.camera.engine.CameraEngine
 import com.ican.camera.engine.CameraMode
 import com.ican.camera.engine.CameraState
@@ -145,6 +146,28 @@ fun CameraScreen(
                     visible = state.isManualControlsVisible,
                     onToggle = { engine.toggleManualControls() }
                 )
+
+                if (state.selectedRearLens == RearLens.MAIN && 
+                    state.bracketState == BracketState.IDLE && 
+                    !state.isRawCaptureEnabled) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { engine.runBracket() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
+                        modifier = Modifier.height(32.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                    ) {
+                        Text("BRACKET TEST", fontSize = 10.sp)
+                    }
+                } else if (state.bracketState != BracketState.IDLE) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "BRACKET: ${state.bracketState}",
+                        color = Color.Yellow,
+                        fontSize = 10.sp,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
         }
 

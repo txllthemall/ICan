@@ -12,14 +12,18 @@ import androidx.camera.core.CameraControl
 import com.ican.camera.capabilities.RearLens
 import com.ican.camera.util.LogUtil
 import java.io.File
+import java.util.Locale
 
 class ManualSensorController(private val context: Context) {
 
     private var activeLimits = ManualLimits()
     private var currentState = ManualSensorState()
     private var lastAppliedSemanticLens: RearLens? = null
+    private var lastId: String? = null
+    private var lastObserved: ObservedSensorState? = null
 
     fun updateLimits(id: String): ManualLimits {
+        lastId = id
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val chars = manager.getCameraCharacteristics(id)
 
@@ -96,19 +100,23 @@ class ManualSensorController(private val context: Context) {
         c2Control.setCaptureRequestOptions(options)
         
         LogUtil.i("Manual sensor state applied for $semanticLens: $state")
-        // Note: report will be written when a corresponding CaptureResult is observed
     }
 
     private var lastReportTime = 0L
     private val REPORT_THROTTLE_MS = 500L
 
     fun onCaptureResult(result: ObservedSensorState) {
+        lastObserved = result
         val now = System.currentTimeMillis()
         if (now - lastReportTime < REPORT_THROTTLE_MS) return
         
         lastReportTime = now
         writeValidationReport(result)
     }
+
+    fun getLastId(): String? = lastId
+    fun getLastObserved(): ObservedSensorState? = lastObserved
+    fun getActiveLimits(): ManualLimits = activeLimits
 
     private fun writeValidationReport(observed: ObservedSensorState) {
         val report = StringBuilder()

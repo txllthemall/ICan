@@ -32,6 +32,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Observer
 import com.ican.camera.capabilities.PhysicalCameraMapper
 import com.ican.camera.capabilities.RearLens
+import com.ican.camera.manual.ExposureBracketController
 import com.ican.camera.manual.ExposureMode
 import com.ican.camera.manual.FocusMode
 import com.ican.camera.manual.ManualSensorController
@@ -60,6 +61,7 @@ class CameraEngine(private val context: Context) {
     private val processingPipeline = ProcessingPipeline(context)
     private val cameraMapper = PhysicalCameraMapper(context)
     private val manualController = ManualSensorController(context)
+    private val bracketController by lazy { ExposureBracketController(context, manualController, cameraExecutor) }
     private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -298,6 +300,36 @@ class CameraEngine(private val context: Context) {
 
     fun toggleManualControls() {
         _state.update { it.copy(isManualControlsVisible = !it.isManualControlsVisible) }
+    }
+
+    fun runBracket() {
+        if (_state.value.bracketState != BracketState.IDLE) return
+        val imageCapture = imageCapture ?: return
+        val cameraControl = camera?.cameraControl ?: return
+        val observed = _state.value.observedSensorState
+        val lens = _state.value.selectedRearLens
+        val previousState = _state.value.manualSensorState
+
+        engineScope.launch {
+            try {
+                val success = bracketController.runBracket(
+                    imageCapture = imageCapture,
+                    cameraControl = cameraControl,
+                    observed = observed,
+                    semanticLens = lens,
+                    onStateUpdate = { newState -> _state.update { it.copy(bracketState = newState) } },
+                    onThumbnailUpdate = { uri -> _state.update { it.copy(lastThumbnailUri = uri, lastThumbnailMimeType = "image/jpeg") } }
+                )
+                
+                _state.update { it.copy(bracketState = if (success) BracketState.COMPLETE else BracketState.FAILED) }
+            } finally {
+                // Restoration
+                _state.update { it.copy(bracketState = BracketState.RESTORING) }
+                manualController.applyState(cameraControl, previousState, lens)
+                delay(500)
+                _state.update { it.copy(bracketState = BracketState.IDLE) }
+            }
+        }
     }
 
     fun takePhoto() {
