@@ -37,6 +37,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class CameraEngine(private val context: Context) {
@@ -88,17 +89,6 @@ class CameraEngine(private val context: Context) {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
 
-            imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setResolutionSelector(resolutionSelector)
-                .setFlashMode(_state.value.flashMode)
-                .build()
-
-            val recorder = Recorder.Builder()
-                .setQualitySelector(QualitySelector.from(_state.value.selectedQuality ?: Quality.FHD))
-                .build()
-            videoCapture = VideoCapture.withOutput(recorder)
-
             val lensFacing = _state.value.lensFacing
             val cameraSelectorBuilder = CameraSelector.Builder()
                 .requireLensFacing(lensFacing)
@@ -121,12 +111,39 @@ class CameraEngine(private val context: Context) {
             try {
                 cameraProvider?.unbindAll()
                 
+                // 1. Resolve CameraInfo and RAW capabilities without binding yet
+                val cameraInfo = cameraProvider!!.getCameraInfo(cameraSelector)
+                val caps = ImageCapture.getImageCaptureCapabilities(cameraInfo)
+                val supportedFormats = caps.supportedOutputFormats
+                val rawSupported = supportedFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
+                val rawJpegSupported = supportedFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+
+                val useRaw = _state.value.isRawCaptureEnabled && rawJpegSupported
+
+                // 2. Build ImageCapture with appropriate format
+                imageCapture = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .setResolutionSelector(resolutionSelector)
+                    .setFlashMode(_state.value.flashMode)
+                    .also {
+                        if (useRaw) {
+                            it.setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+                        }
+                    }
+                    .build()
+
+                val recorder = Recorder.Builder()
+                    .setQualitySelector(QualitySelector.from(_state.value.selectedQuality ?: Quality.FHD))
+                    .build()
+                videoCapture = VideoCapture.withOutput(recorder)
+
                 // Get candidate IDs for debugging
                 val candidates = cameraProvider?.availableCameraInfos
                     ?.filter { it.lensFacing == lensFacing }
                     ?.map { Camera2CameraInfo.from(it).cameraId }
                     ?: emptyList()
 
+                // 3. Single atomic bind for all use cases
                 camera = cameraProvider?.bindToLifecycle(
                     lifecycleOwner,
                     cameraSelector,
@@ -146,6 +163,8 @@ class CameraEngine(private val context: Context) {
 
                 _state.update { it.copy(
                     isReady = true,
+                    isRawSupported = rawSupported,
+                    isRawJpegSupported = rawJpegSupported,
                     hasFlash = capabilities?.hasFlash ?: false,
                     hasTorch = camera?.cameraInfo?.hasFlashUnit() ?: false,
                     supportedQualities = supportedQualities,
@@ -153,7 +172,7 @@ class CameraEngine(private val context: Context) {
                     minZoomRatio = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1.0f,
                     maxZoomRatio = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1.0f
                 ) }
-                LogUtil.i("CAMERA_READY boundId=$boundId")
+                LogUtil.i("CAMERA_READY boundId=$boundId RAW_JPEG=$useRaw")
                 
                 generateLensSelectionReport(requestedLens, targetInfo?.id, candidates, boundId, null)
                 
@@ -197,6 +216,11 @@ class CameraEngine(private val context: Context) {
         _state.update { it.copy(selectedRearLens = lens, isReady = false) }
     }
 
+    fun setRawCaptureEnabled(enabled: Boolean) {
+        if (_state.value.isRawCaptureEnabled == enabled) return
+        _state.update { it.copy(isRawCaptureEnabled = enabled, isReady = false) }
+    }
+
     fun takePhoto() {
         val imageCapture = imageCapture ?: return
         val currentCount = inFlightCount.get()
@@ -211,11 +235,87 @@ class CameraEngine(private val context: Context) {
         val newCount = inFlightCount.incrementAndGet()
         updateCapturingState(newCount)
 
-        if (_state.value.processingMode == ProcessingMode.NONE) {
+        if (_state.value.isRawCaptureEnabled && _state.value.isRawJpegSupported) {
+            takeRawJpegPhoto(imageCapture, tRequested)
+        } else if (_state.value.processingMode == ProcessingMode.NONE) {
             takeDirectPhoto(imageCapture, tRequested)
         } else {
             takeProcessedPhoto(imageCapture, tRequested)
         }
+    }
+
+    private fun takeRawJpegPhoto(imageCapture: ImageCapture, tRequested: Long) {
+        LogUtil.i("RAW_JPEG_CAPTURE_REQUESTED")
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(System.currentTimeMillis())
+        
+        val rawValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "ICAN_$timestamp")
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/ICan/RAW")
+            }
+        }
+        val rawOptions = ImageCapture.OutputFileOptions.Builder(
+            context.contentResolver,
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            rawValues
+        ).build()
+
+        val jpegValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "ICAN_$timestamp")
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/ICan/RAW")
+            }
+        }
+        val jpegOptions = ImageCapture.OutputFileOptions.Builder(
+            context.contentResolver,
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            jpegValues
+        ).build()
+
+        var rawUri: Uri? = null
+        var jpegUri: Uri? = null
+        val isFinished = AtomicBoolean(false)
+
+        imageCapture.takePicture(
+            rawOptions,
+            jpegOptions,
+            cameraExecutor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onCaptureStarted() {
+                    LogUtil.i("RAW_JPEG_CAPTURE_STARTED")
+                    decrementInFlight()
+                }
+
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    val uri = outputFileResults.savedUri
+                    if (outputFileResults.imageFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+                        rawUri = uri
+                        LogUtil.i("RAW_SAVED: $rawUri")
+                    } else {
+                        jpegUri = uri
+                        LogUtil.i("JPEG_SAVED: $jpegUri")
+                        // Restore thumbnail behavior: use JPEG component
+                        _state.update { it.copy(lastThumbnailUri = uri, lastThumbnailMimeType = "image/jpeg") }
+                    }
+
+                    if (rawUri != null && jpegUri != null) {
+                        if (isFinished.compareAndSet(false, true)) {
+                            LogUtil.i("RAW_JPEG_VALIDATED")
+                            generateRawValidationReport(rawUri, jpegUri, null)
+                        }
+                    }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    if (isFinished.compareAndSet(false, true)) {
+                        LogUtil.e("RAW_JPEG capture failed", exception)
+                        generateRawValidationReport(null, null, exception.message)
+                    }
+                }
+            }
+        )
     }
 
     private fun takeDirectPhoto(imageCapture: ImageCapture, tRequested: Long) {
@@ -393,7 +493,7 @@ class CameraEngine(private val context: Context) {
         } else {
             CameraSelector.LENS_FACING_BACK
         }
-        _state.update { it.copy(lensFacing = newLensFacing, isReady = false, selectedRearLens = RearLens.MAIN) }
+        _state.update { it.copy(lensFacing = newLensFacing, isReady = false, selectedRearLens = RearLens.MAIN, isRawCaptureEnabled = false) }
     }
 
     fun setFlashMode(flashMode: Int) {
@@ -422,6 +522,38 @@ class CameraEngine(private val context: Context) {
             .setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS)
             .build()
         camera?.cameraControl?.startFocusAndMetering(action)
+    }
+
+    private fun generateRawValidationReport(rawUri: Uri?, jpegUri: Uri?, error: String?) {
+        val report = StringBuilder()
+        report.append("=== ICAN RAW CAPTURE VALIDATION ===\n\n")
+        report.append("Semantic Lens: ${_state.value.selectedRearLens}\n")
+        report.append("RAW Supported: ${_state.value.isRawSupported}\n")
+        report.append("RAW+JPEG Supported: ${_state.value.isRawJpegSupported}\n\n")
+        
+        if (error != null) {
+            report.append("Capture Status: FAILED\n")
+            report.append("Error: $error\n")
+        } else {
+            report.append("RAW Capture:\n")
+            report.append("Status: SUCCESS\n")
+            report.append("URI: $rawUri\n")
+            
+            if (jpegUri != null) {
+                report.append("\nJPEG Companion:\n")
+                report.append("Status: SUCCESS\n")
+                report.append("URI: $jpegUri\n")
+            }
+        }
+        report.append("\n=== END ===\n")
+        
+        try {
+            val file = File(context.cacheDir, "ican_raw_capture_validation.txt")
+            file.writeText(report.toString())
+            LogUtil.i("RAW validation report written to: ${file.absolutePath}")
+        } catch (e: Exception) {
+            LogUtil.e("Failed to write RAW report", e)
+        }
     }
 
     @OptIn(ExperimentalCamera2Interop::class)

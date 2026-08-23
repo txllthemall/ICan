@@ -20,6 +20,9 @@ enum class RecordingState {
 data class CameraState(
     val mode: CameraMode = CameraMode.PHOTO,
     val selectedRearLens: RearLens = RearLens.MAIN,
+    val isRawCaptureEnabled: Boolean = false,
+    val isRawSupported: Boolean = false,
+    val isRawJpegSupported: Boolean = false,
     val processingMode: ProcessingMode = ProcessingMode.NONE,
     val icanAutoConfig: ICanAutoConfig = ICanAutoConfig(),
     val activeProfile: CameraProfile? = null,

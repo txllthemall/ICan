@@ -222,7 +222,7 @@ discover the actual Camera2 / CameraX capabilities exposed by the connected OneP
 - **Engineering Note**: Encoded video validation was intentionally deferred to the future production video-settings / recording implementation rather than maintaining a separate temporary diagnostic recording stack. 4K120, 240 fps, and HDR modes are not yet marked production-ready.
 
 ### Phase 2E — RAW / Manual Sensor Foundation
-**Status: PLANNED**
+**Status: IN PROGRESS**
 - Planned goals:
   - public Camera2 RAW_SENSOR validation
   - DNG capture
@@ -233,3 +233,42 @@ discover the actual Camera2 / CameraX capabilities exposed by the connected OneP
   - exposure compensation
   - per-physical-camera manual capability validation
   - foundation for future computational photography / ICan Auto
+
+### Phase 2E.1 — RAW Capture Foundation
+**Status: COMPLETED**
+- Implementation of RAW+JPEG simultaneous capture foundation using public CameraX 1.6.1 APIs.
+- Generic capability-driven RAW support (validated via `ImageCaptureCapabilities`).
+- Isolated diagnostic RAW capture path (`RAW+JPEG TEST`).
+- DNG output saved to `DCIM/ICan/RAW` via MediaStore.
+- Deterministic diagnostic report `ican_raw_capture_validation.txt`.
+- Physically verified results on OnePlus 15 CPH2745:
+  - Normal PHOTO startup preview remains stable.
+  - Normal JPEG capture remains functional.
+  - NONE / AUTO / CAMERA_PROFILE remain functional.
+  - Physical UW / MAIN / TELE switching remains functional.
+  - FRONT / BACK switching remains functional.
+  - Normal VIDEO preview and recording remain functional.
+  - CameraX public RAW+JPEG simultaneous capture works on the semantic MAIN camera.
+  - One shutter produces a real DNG RAW file plus companion JPEG.
+  - Android Gallery recognizes and opens the DNG as RAW.
+  - Companion JPEG is valid and displayable.
+  - RAW capture no longer breaks subsequent PHOTO or VIDEO sessions.
+  - Normal photo thumbnail behavior is restored.
+  - RAW+JPEG thumbnail uses the companion JPEG rather than the DNG.
+  - Experimental/unvalidated video-quality UI was removed.
+  - Stale debug Quality object text was removed.
+- **Architecture Note**: RAW support remains capability-driven and must not depend on hardcoded OnePlus physical camera IDs. The current RAW implementation is a foundation only.
+- **Note**: Manual controls, RAW processing, and computational RAW pipelines are deferred to future subphases.
+
+### Phase 2E.2 — Manual Sensor Controls
+**Status: PLANNED**
+- Planned scope:
+  - Manual ISO
+  - Manual exposure time
+  - Manual focus distance
+  - AE lock
+  - AWB lock
+  - Exposure compensation
+  - Capability-driven limits
+  - Per-physical-camera validation
+  - Foundation for controlled multi-frame capture

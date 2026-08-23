@@ -127,14 +127,14 @@ fun CameraScreen(
                     currentLens = state.selectedRearLens,
                     onLensChange = { engine.setRearLens(it) }
                 )
-            }
-            
-            if (state.mode == CameraMode.VIDEO && state.recordingState == RecordingState.IDLE) {
-                QualitySelector(
-                    qualities = state.supportedQualities,
-                    selected = state.selectedQuality,
-                    onQualityChange = { engine.setQuality(it) }
-                )
+
+                if (state.isRawJpegSupported) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    RawCaptureToggle(
+                        enabled = state.isRawCaptureEnabled,
+                        onToggle = { engine.setRawCaptureEnabled(it) }
+                    )
+                }
             }
         }
 
@@ -198,22 +198,45 @@ fun CameraScreen(
             )
         }
 
-        // Re-bind when lens, quality, rear lens or lifecycle changes
+        // Re-bind when lens, quality, rear lens, raw, or lifecycle changes
         var currentLensFacing by remember { mutableIntStateOf(state.lensFacing) }
         var currentQuality by remember { mutableStateOf(state.selectedQuality) }
         var currentRearLens by remember { mutableStateOf(state.selectedRearLens) }
+        var currentRawEnabled by remember { mutableStateOf(state.isRawCaptureEnabled) }
         
-        LaunchedEffect(state.lensFacing, state.selectedQuality, state.selectedRearLens, lifecycleOwner) {
-            if (currentLensFacing != state.lensFacing || 
-                currentQuality != state.selectedQuality ||
-                currentRearLens != state.selectedRearLens) {
-                
+        LaunchedEffect(state.lensFacing, state.selectedQuality, state.selectedRearLens, state.isRawCaptureEnabled, lifecycleOwner) {
+            val facingChanged = currentLensFacing != state.lensFacing
+            val qualityChanged = currentQuality != state.selectedQuality
+            val lensChanged = currentRearLens != state.selectedRearLens
+            val rawChanged = currentRawEnabled != state.isRawCaptureEnabled
+            
+            if (facingChanged || qualityChanged || lensChanged || rawChanged) {
                 currentLensFacing = state.lensFacing
                 currentQuality = state.selectedQuality
                 currentRearLens = state.selectedRearLens
+                currentRawEnabled = state.isRawCaptureEnabled
+                
                 previewView?.let { engine.bindToLifecycle(lifecycleOwner, it) }
             }
         }
+    }
+}
+
+@Composable
+fun RawCaptureToggle(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Button(
+        onClick = { onToggle(!enabled) },
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (enabled) Color.Yellow else Color.Gray.copy(alpha = 0.5f),
+            contentColor = if (enabled) Color.Black else Color.White
+        ),
+        modifier = Modifier.height(32.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+    ) {
+        Text("RAW+JPEG TEST", fontSize = 10.sp)
     }
 }
 
@@ -414,8 +437,15 @@ fun QualitySelector(
     ) {
         qualities.forEach { quality ->
             val isSelected = quality == selected
+            val label = when(quality) {
+                androidx.camera.video.Quality.SD -> "SD"
+                androidx.camera.video.Quality.HD -> "HD"
+                androidx.camera.video.Quality.FHD -> "FHD"
+                androidx.camera.video.Quality.UHD -> "4K"
+                else -> "QUAL"
+            }
             Text(
-                text = quality.toString(), 
+                text = label, 
                 color = if (isSelected) Color.Yellow else Color.White,
                 modifier = Modifier.clickable { onQualityChange(quality) },
                 fontSize = 12.sp,
